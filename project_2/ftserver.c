@@ -1,6 +1,6 @@
 /*
-* CS372: Project 1
-* Chat Server: chatserve.py
+* CS372: Project 2
+* FT Server: ftserve.c
 * Skyler Wilson
 * description:
 	* Design and implement a simple FTP service between a server and a client 
@@ -39,3 +39,84 @@
 * references:
        * see the included README.txt file for documentation of the program (chatclient.c)
 */
+
+#include <assert.h>
+#include <ctype.h>
+#include <dirent.h>
+#include <netdb.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+
+void checkArgs(int agrc, char** argv, int s_portno);
+int checkPortArgInt(char* portArg, int* s_portno);
+
+int main(int argc, char** argv){
+	int s_portno;
+	checkArgs(argc, argv, s_portno);
+	
+
+	return 0;
+}
+
+/* void checkArgs function: 
+	* inputs:
+		* int argc -- holds the number of command line argument passed in by user
+		* char** argv -- a pointer to pointers of type char -- an array of char pointers (c strings) -- an array of command line arguments
+		* int s_portno -- holds the <SERVER_PORT> upon conversion to integer
+	* outputs:
+		* 
+	* purpose:
+		* 
+*/
+void checkArgs(int argc, char** argv, int s_portno){
+	if(argc != 2){
+		fprintf(stderr, "usage: ./ftserver <SERVER_PORT>\n");
+		exit(1);
+	}
+	
+	// check if s_portno argument is an integer
+	if(!checkPortArgInt(argv[1], &s_portno)){
+		fprintf(stderr, "error: ftserver port number must be an integer\n");
+		exit(1);
+	}
+
+	// check s_portno range [1024, 65535]
+	if(s_portno < 1024 || s_portno > 65535){
+		fprintf(stderr, "error: ftserver port number must be between 1024-65535\n");
+		exit(1);
+	}
+
+}
+
+/* int checkPortArg function: 
+	* inputs:
+		* char* portArg -- holds the <SERVER_PORT> argument from command line
+		* int* s_portno -- pointer to variable that to hold <SERVER_PORT> upon conversion to integer
+	* outputs:
+		* returns 1 if portArg is an integer; returns 0 if portArg is not an integer
+	* purpose:
+		* to ensure that the command line argument, portArg, is an integer and therefore can be assigned to the server socket
+*/
+int checkPortArgInt(char* portArg, int* s_portno){
+	// this var holds a potential trailing non-whitespace char
+	char strCheck;
+	
+	// sscanf returns the number of variables filled; in case of input failure before any data could be successfully read, EOF is returned
+	// in this case, if portno argument is an integer value 1 is returned (1 int variable filled) else 0 returned (0 variables filled)
+	int matches = sscanf(portArg, "%d %c", s_portno, &strCheck);
+
+	return matches == 1;
+}
+
+
+
+
