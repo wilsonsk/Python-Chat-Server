@@ -58,15 +58,20 @@
 #define c_portno_min	1024
 #define c_portno_max	65535
 
+//The backlog argument specifies the maximum number of queued connections and should be at least 0; 
+//the maximum value is system-dependent (usually 5), the minimum value is forced to 0
+#define BACKLOG		5
 
-void checkArgs(int agrc, char** argv, int s_portno);
+
+
+void checkArgs(int agrc, char** argv, int* s_portno);
 int checkPortArgInt(char* portArg, int* s_portno);
 void ftp(int s_portno);
 
 int main(int argc, char** argv){
 	int s_portno;
-	checkArgs(argc, argv, s_portno);
-	
+	checkArgs(argc, argv, &s_portno);
+	ftp(s_portno);	
 
 	return 0;
 }
@@ -86,20 +91,20 @@ int main(int argc, char** argv){
 		* checks that argument 1 <SERVER_PORT> is an integer 
 		* checks that argument 1 <SERVER_PORT> is within range
 */
-void checkArgs(int argc, char** argv, int s_portno){
+void checkArgs(int argc, char** argv, int* s_portno){
 	if(argc != 2){
 		fprintf(stderr, "usage: ./ftserver <SERVER_PORT>\n");
 		exit(1);
 	}
 	
 	// check if s_portno argument is an integer
-	if(!checkPortArgInt(argv[1], &s_portno)){
+	if(!checkPortArgInt(argv[1], s_portno)){
 		fprintf(stderr, "error: ftserver port number must be an integer\n");
 		exit(1);
 	}
 
 	// check s_portno range [1024, 65535]
-	if(s_portno < c_portno_min || s_portno > c_portno_max){
+	if(*s_portno < c_portno_min || *s_portno > c_portno_max){
 		fprintf(stderr, "error: ftserver port number must be between 1024-65535\n");
 		exit(1);
 	}
@@ -109,7 +114,7 @@ void checkArgs(int argc, char** argv, int s_portno){
 /* int checkPortArg function: 
 	* inputs:
 		* char* portArg -- holds the <SERVER_PORT> argument from command line
-		* int* s_portno -- pointer to variable that to hold <SERVER_PORT> arugment from command line upon conversion to integer
+		* int* s_portno -- pointer to variable that holds <SERVER_PORT> arugment from command line upon conversion to integer
 	* outputs:
 		* returns 1 if portArg is an integer; returns 0 if portArg is not an integer
 	* purpose:
@@ -178,8 +183,46 @@ void ftp(int s_portno){
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 
 	//bind server socket with host address and server portno
+	//int status is an integer that holds return value of bind, listen, connect socket functions for error checking
 	int status = bind(s_sockfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr));
+	if(status == -1){
+		perror("socket binding");
+		exit(1);
+	}
+	
+	//listen for incoming connections
+	//listen() puts the socket into server mode
+	//Listen for connections made to the socket. The backlog argument specifies the maximum number of queued connections and should be at least 0; 
+	//the maximum value is system-dependent (usually 5), the minimum value is forced to 0 --  this is a global variable defined a top of document
+	status = listen(s_sockfd, BACKLOG);
+	if(status == -1){
+		perror("server listen");
+		exit(1);
+	}else{
+		printf("Server open on %d\n", serv_addr.sin_port);
+	}
+	
+	
+	//use sigaction() to register a signal handling function (that I've created for a specific set of signals)
+	//int sigaction(int signo, struct sigaction* newaction, struct sigaction* origaction) -- this is a pointer function field within the sigaction structure
+		//1st parameter: the signal type of interest (i.e., that triggers a specific handling function)
+		//2nd parameter: a pointer to a special sigaction structure -- describes the action to be taken upon receipt of signal (1st parameter)
+			//this sigaction structure has a field called sa.handler (a pointer to a function) and it is assigned the address of the handler function
+		//3rd parameter: a pointer to another sigaction structure -- the sigaction() function will use this pointer to write out what the settings were before the change was requested
+		
+	//struct sigaction{ void (*sa_handler)(int); sigset_t sa_mask; int sa_flags; void (*sa_sigaction)(int, siginfo_t*, void*); -- sigset_t is a signal set (a list of signal types)
+		// void (*sa_handler)(int): 3 possible values:
+			// SIG_DFL -- take the default action
+			// SIG_IGN -- ignore the signal
+			// &<someHandlerFunction> -- a pointer to a function that should be called when this signal is received
+		// sigset_t sa_mask -- includes what signals should be blocked while the signal handler is executing
+			// blocked means that the signals are put on hold until your signal handler is done executing
 
+
+
+
+	//initiate FTP services upon client connection to server socket
+		
 
 }
 
