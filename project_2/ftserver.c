@@ -71,6 +71,8 @@ int checkPortArgInt(char* portArg, int* s_portno);
 void ftp(int s_portno);
 void intSigHandler(int signal);
 int controlConnection(int c_controlfd, char* commandArg, int* dataConnPort, char* filename);
+void recvPack(int sockfd, char* option, char* data);
+void recvFile(int sockfd, void* buf, int size);
 
 int main(int argc, char** argv){
 	int s_portno;
@@ -274,7 +276,7 @@ void ftp(int s_portno){
 			exit(1);
 		}
 
-		//inet_ntoa: converts the internet host address (clientIP) given in network byte order, to a string in IPv4 dotted-decimal notation. 
+		//inet_ntoa(struct in_addr in): converts the internet host address called 'in' (clientIP) given in network byte order(Big Endian), to a string in IPv4 dotted-decimal notation. 
 			//the string is returned in a statically allocated buffer which subsequent calls will overwrite
 		clientIP = inet_ntoa(client_addr.sin_addr);
 		printf("control connection established with %s\n", clientIP);
@@ -337,7 +339,7 @@ void intSigHandler(int signal){
 			* modifies commandArg, dataConnPort, filename
 		* -1 on failure
 	* calls:
-		* recvPack()
+		* recvPack(int sockfd, char* cmdArg, char* fileArg)
 		* sendPack()
 	* purpose:
 		* read in from client and store command arugments in appropriate static arrays 
@@ -347,9 +349,110 @@ void intSigHandler(int signal){
 int controlConnection(int c_controlfd, char* commandArg, int* dataConnPort, char* filename){
 	char readinFilename[MAX_PACK_PAYLOAD_LEN + 1];		//holds read in client <FILENAME> argument -- input packet payload
 	char readinCommand[ARG_LEN + 1];			//holds read in client <COMMAND> argument
+	char readinDataPort[MAX_PACK_PAYLOAD_LEN + 1];
 	char readoutData[MAX_PACK_PAYLOAD_LEN + 1];
-	char readoutArg[ARG_LEN + 1];
+	char readoutOption[ARG_LEN + 1];
 
-	//read in data from client
+	//read in data connection port from client
+	recvPack(c_controlfd, readinCommand, readinDataPort);
+	//if the command line option held in readinCommand == DPORT, then convert string held in readinDataPort to integer and assign to dataConnPort
+	if(strcmp(readinCommand, "DPORT") == 0){
+		*dataConnPort = atoi(readinDataPort);
+	}
+		
+
+	//read in command from client
+	recvPack(c_controlfd, readinCommand, readinFilename);
+	strcpy(commandArg, readinCommand);
+	strcpy(filename, readinFilename);
+
+	//error check
+	if(strcmp(readinCommand, "LIST") != 0 && strcmp(readinCommand, "GET") != 0){
+		strcpy(readoutOption, "ERROR");
+		strcpy(readoutData, "command usage: -l || -g <FILENAME>");
+		sendPack(c_controlfd, readoutOption, readoutData);
+		return -1;
+	}else{
+		strcpy(readoutOption, "valid command");
+		sendPack(c_controlfd, readoutOption, "");
+		return 0;
+	}		
+}
+
+/* void recvPack(int sockfd, char* option, char* data){
+	* inputs:
+		* int sockfd -- file descriptor of socket connection to be used for communication
+		* char* option -- a string that holds an option from client command line to be received
+		* char* data -- a string that holds the data from the client command line to be received
+	* outputs:
+		* char* option, char* data modified and now hold data read in from client
+	* calls:
+		* recvFile()
+	* purpose:
+		* receives data packets from given client socket connection: ref: Beej's Guide to Network Programming: section 7.5, page 53
+			* len (1 byte, unsigned) -- total length of the packet, counting the 8-byte command option (-l || -g) and n-bytes data
+			* command option (8-bytes)
+			* client data (n-bytes)
+
+*/			
+void recvPack(int sockfd, char* option, char* data){
+	unsigned short packLen;		//holds client packet size
+	unsigned short dataLen;		//holds client data (payload) size
+	char optionBuf[ARG_LEN + 1];
+	char dataBuf[MAX_PACK_PAYLOAD_LEN + 1];
+
+	//read in client packet size: packLen passed by reference because this var will be modified within the recvFile()
+	recvFile(sockfd, &packLen, sizeof(&packLen));
+	//ntohs(uint16_t netshort): function that converts the unsigned short integer called netshort from network byte (Big Endian) order to host byte order (little Endian)
+	packLen = ntohs(packLen);	
+
+	//read in client command 
+	recvFile(sockfd, optionBuf, ARG_LEN);
+	//set string terminator character to end of optionBuf to mark end of option string
+	optionBuf[ARG_LEN] = '\0';
+	if(option != NULL){
+		strcpy(option, optionBuf);
+	}	
 	
+	//receive data payload from client: dataLen = total packet size - command option - sizeof packLen
+	dataLen = packLen - ARG_LEN - sizeof(packLen);
+	recvFile(sockfd, dataBuf, dataLen);
+	//set string terminator character to end of dataBuf to mark end of data payload string
+	dataBuf[dataLen] = '\0';
+	if(data != NULL){
+		strcpy(data, dataBuf);
+	}
+
+}
+
+/* void recvFile(int sockfd, void* buf, int size)
+	* inputs: 
+		* int sockfd -- file descriptor of the socket connection to be used for FTP
+		* void* buf -- this is a generic pointer type which can be converted to any other pointer type without explicit cast: must convert to complete data type before dereferencing or pointer arithmetic
+			    -- this buffer will be used to store the client's data
+		* int size -- pre determined number of bytes to accept/receive from client
+	* outputs:	
+		* on success -- client data stored in void* buf
+		* on failure -- perror(<error_message>) exit(1)
+	* calls:
+		* ssize_t recv(int sockfd, void* buf, size_t len, int flags) 
+			* sockfd -- specifies the socket file descriptor
+			* buffer -- points to a buffer where the message should be stored
+			* length -- specifies the length in bytes of the buffer pointed to by the buffer argument
+			* flags -- specifies the type of message reception. Values of this argument are formed by logically OR'ing zero or more of specific values 
+			* returns -- on success number of bytes received ; on failure -1
+				* more data may be coming as long as the return value is greater than 0
+				* recv will block if the connection is open but no data is available
+				* this function is called until return value is 0 (i.e., all data received from client)
+	* purpose:
+		* receive client data (either client command of filename to retrieve)
+*/
+void recvFile(int sockfd, void* buf, int presetSize){
+	int recvReturnBytes;		//holds return value of recv()
+	int totalRecvBytes = 0;		//holds total number of bytes received from client
+
+	//receive passed in number of bytes from client
+	while(totalRecvBytes < presetSize){
+		recvReturnBytes = recv(sockfd, buf + totalRecvBytes);
+	}
 }
