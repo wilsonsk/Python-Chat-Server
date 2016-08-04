@@ -55,8 +55,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define c_portno_min	1024
-#define c_portno_max	65535
+#define c_portno_min		1024
+#define c_portno_max		65535
+#define ARG_LEN			8	//number of bytes for command line <COMMAND> argument (-l or -g)
+#define MAX_PACK_PAYLOAD_LEN	512	//max number of bytes in packet payload
 
 //The backlog argument specifies the maximum number of queued connections and should be at least 0; 
 //the maximum value is system-dependent (usually 5), the minimum value is forced to 0
@@ -68,6 +70,7 @@ void checkArgs(int agrc, char** argv, int* s_portno);
 int checkPortArgInt(char* portArg, int* s_portno);
 void ftp(int s_portno);
 void intSigHandler(int signal);
+int controlConnection(int c_controlfd, char* commandArg, int* dataConnPort, char* filename);
 
 int main(int argc, char** argv){
 	int s_portno;
@@ -199,8 +202,6 @@ void ftp(int s_portno){
 	if(status == -1){
 		perror("server listen");
 		exit(1);
-	}else{
-		printf("Server open on %d\n", serv_addr.sin_port);
 	}
 	
 	
@@ -210,7 +211,7 @@ void ftp(int s_portno){
 		//2nd parameter: a pointer to a special sigaction structure -- describes the action to be taken upon receipt of signal (1st parameter)
 			//this sigaction structure has a field called sa.handler (a pointer to a function) and it is assigned the address of the handler function
 		//3rd parameter: a pointer to another sigaction structure -- the sigaction() function will use this pointer to write out what the settings were before the change was requested
-		
+		// returns 0 on success; -1 on failure -- (this is an assumption)
 	//struct sigaction{ void (*sa_handler)(int); sigset_t sa_mask; int sa_flags; void (*sa_sigaction)(int, siginfo_t*, void*); -- sigset_t is a signal set (a list of signal types)
 		// void (*sa_handler)(int): 3 possible values:
 			// SIG_DFL -- take the default action
@@ -231,16 +232,124 @@ void ftp(int s_portno){
 
 	//handles interrupt signals
 	struct sigaction interrupt;
+	//set handler function to be called (via function pointer)
 	interrupt.sa_handler = &intSigHandler;
-		
+	//setting NO FLAGS (i.e., 0)
+	interrupt.sa_flags = 0;	
 
+	// int sigemptyset(sigset_t* set): initializes the signal set pointed to by parameter 'set', such that all signals signals defined in this document are excluded
+		// returns 0 on success; -1 on failure (errno set)
+	sigemptyset(&interrupt.sa_mask);
+	
+	// SIGINT: signal interrupt
+		// 1st parameter: setting interrup signal as signal of interest (i.e., signal that triggers handler)
+		// 2nd parameter: pointer to the specific sigaction structure which was initialized above
+		// 3rd parameter: pointer to another sigaction structure (in this case it is not used; set to 0)
+	status = sigaction(SIGINT, &interrupt, 0);
+	if(status == -1){
+		perror("sigaction");
+		exit(1);
+	}
+		
 
 	//initiate FTP services upon client connection to server socket
+	printf("Server open on %d\n", serv_addr.sin_port);
+	while(1){
+		// initialize client socket vars
+		char* clientIP;		//holds client IPv4 dd address
+		socklen_t clilen;	//length of sockaddr_in struct client_addr 
+		struct sockaddr_in client_addr;
+		int c_controlfd, c_datafd;
+		int dataConnPort;
+
+		//ftp vars
+		char commandArg[ARG_LEN + 1];			//buffer for <COMMAND> arg (-l || -g)
+		char filename[MAX_PACK_PAYLOAD_LEN + 1];	//buffer for <FILENAME> arg
+
+		//create FTP control connection
+		clilen = sizeof(client_addr);
+		c_controlfd = accept(s_sockfd, (struct sockaddr*) &client_addr, &clilen);
+		if(c_controlfd == -1){
+			perror("accept");
+			exit(1);
+		}
+
+		//inet_ntoa: converts the internet host address (clientIP) given in network byte order, to a string in IPv4 dotted-decimal notation. 
+			//the string is returned in a statically allocated buffer which subsequent calls will overwrite
+		clientIP = inet_ntoa(client_addr.sin_addr);
+		printf("control connection established with %s\n", clientIP);
 		
+		//enable/maintain basic communication via control connection with client
+		status = controlConnection(c_controlfd, commandArg, &dataConnPort, filename);
+
+		//once control connection maintained, start FTP services
+	
+	}	
 
 }
 
+/* void intSigHandler(int signal)
+        * inputs:
+                * int signal -- holds the signal number/id
+        * outputs:
+                * on success -- void -- restore signal handling to default behavior; send an interrup signal to force default behavior
+                * on failure -- perrer(<error_message>) exit(1)
+        * calls:
+		* sigaction(int signo, struct sigaction* newaction, struct sigaction* origaction)
+		* raise(int signal)
+        * purpose:
+		* callback function
+		* displays feedback before terminating ftserver program due to interrupt signal
+		* restore signal handling to default action; send an interrup signal to force default action
+			* via setting *sa_handler = SIG_DFL which directs handler to take default action
 
+*/
 void intSigHandler(int signal){
+	int status;
+	struct sigaction interrupt;
 
+	printf("ftserver closed due to interrupt signal\n");
+
+	//restore signal (interrupt) handling to default action via SIG_DFL
+	interrupt.sa_handler = SIG_DFL;
+	status = sigaction(SIGINT, &interrupt, 0);
+	if(status == -1){
+		perror("sigaction in handler");
+		exit(1);
+	}
+	
+	//send an interrupt signal to force default action -- to be acted on by the newly set default action for this signal
+	status = raise(SIGINT);
+	if(status == -1){
+		perror("raise");
+		exit(1);
+	}
+}
+
+/* int controlConnection(int c_controlfd, char* commandArg, int* dataConnPort, char* filename)
+	* inputs:
+		* int c_controlfd -- file descriptor of control socket
+		* char* commandArg -- pointer/c string (static array) holding <COMMAND> argument from command line (-l || -g) 
+		* int* dataConnPort -- holds data connection port file descriptor
+		* char* filename -- pointer/c string (static array) holding <FILENAME> argument from command line
+	* outputs:
+		* 0 on success
+			* modifies commandArg, dataConnPort, filename
+		* -1 on failure
+	* calls:
+		* recvPack()
+		* sendPack()
+	* purpose:
+		* read in from client and store command arugments in appropriate static arrays 
+		* send feedback to client 
+		* establish && maintain basic control connection between server and client
+*/
+int controlConnection(int c_controlfd, char* commandArg, int* dataConnPort, char* filename){
+	char readinFilename[MAX_PACK_PAYLOAD_LEN + 1];		//holds read in client <FILENAME> argument -- input packet payload
+	char readinCommand[ARG_LEN + 1];			//holds read in client <COMMAND> argument
+	char readoutData[MAX_PACK_PAYLOAD_LEN + 1];
+	char readoutArg[ARG_LEN + 1];
+
+	//read in data from client
+	
 }
