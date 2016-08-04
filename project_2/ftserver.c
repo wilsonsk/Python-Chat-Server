@@ -67,6 +67,7 @@
 void checkArgs(int agrc, char** argv, int* s_portno);
 int checkPortArgInt(char* portArg, int* s_portno);
 void ftp(int s_portno);
+void intSigHandler(int signal);
 
 int main(int argc, char** argv){
 	int s_portno;
@@ -138,7 +139,7 @@ int checkPortArgInt(char* portArg, int* s_portno){
 		* on success -- 
 		* on failure -- perrer(<error_message>) exit(1)
 	* calls:
-		* 
+		* void intSigHandler(int signal)
 	* purpose:
 		* create server socket; bind server socket with server address and server port number
 		* listen for incoming connections on socket
@@ -215,10 +216,23 @@ void ftp(int s_portno){
 			// SIG_DFL -- take the default action
 			// SIG_IGN -- ignore the signal
 			// &<someHandlerFunction> -- a pointer to a function that should be called when this signal is received
-		// sigset_t sa_mask -- includes what signals should be blocked while the signal handler is executing
+		// sigset_t sa_mask: includes what signals should be blocked while the signal handler is executing
 			// blocked means that the signals are put on hold until your signal handler is done executing
+			// you need to pass this a signal set
+		// int sa_flags:  provides additional options (flags)
+			// SA_RESTHAND -- resets the signal handler to SIG_DFL (default action) after the first signal has been received and handled 
+			// SA_SIGINFO -- tells the kernel to call the function specified in the sigaction struct's 4th field (sa_sigaction), instead of the first field (sa_handler)
+				//more detailed information is passed to this function
+			// make sure that you set sa_flags to 0 if you aren't planning to set any flags
+		// void(*sa_sigaction)(int, siginfo_t*, void*)
+			// *sig_action specifies an alternative signal handler function to be called; this attribute will only be used if the SA_SIGINFO flag is set in sa_flags
+			// the signinfo_t structure contains information such as which process sent you the signal
+			// most of the time you will use sa_handler and not sa_sigaction
 
-
+	//handles interrupt signals
+	struct sigaction interrupt;
+	interrupt.sa_handler = &intSigHandler;
+		
 
 
 	//initiate FTP services upon client connection to server socket
@@ -226,3 +240,7 @@ void ftp(int s_portno){
 
 }
 
+
+void intSigHandler(int signal){
+
+}
