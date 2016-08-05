@@ -73,6 +73,9 @@ void intSigHandler(int signal);
 int controlConnection(int c_controlfd, char* commandArg, int* dataConnPort, char* filename);
 void recvPack(int sockfd, char* option, char* data);
 void recvFile(int sockfd, void* buf, int size);
+int dataConnection(int controlfd, int datafd, char* commandArg, char* filename);
+char** listFiles(char* dirname, int* numFiles);
+
 
 int main(int argc, char** argv){
 	int s_portno;
@@ -285,7 +288,31 @@ void ftp(int s_portno){
 		status = controlConnection(c_controlfd, commandArg, &dataConnPort, filename);
 
 		//once control connection maintained, start FTP services
-	
+		if(status != -1){
+			int numFTPs; 
+
+			//create data connection
+			c_datafd = socket(AF_INET, SOCK_STREAM, 0);
+			if(c_datafd == -1){
+				perror("c_datafd");
+				exit(1);
+			}	
+			printf("data connection established with %s\n", clientIP);
+			
+			//start FTP with client
+			dataConnection(c_controlfd, c_datafd, commandArg, filename);
+			
+			//accept ACK from client
+			recvPack(c_controlfd, NULL, NULL);
+
+			//close FTP data connection
+			status = close(c_datafd);
+			if(status == -1){
+				perror("close");
+				exit(1);
+			}
+			printf("ftserver: FTP data connection closed\n");
+		}
 	}	
 
 }
@@ -453,6 +480,203 @@ void recvFile(int sockfd, void* buf, int presetSize){
 
 	//receive passed in number of bytes from client
 	while(totalRecvBytes < presetSize){
-		recvReturnBytes = recv(sockfd, buf + totalRecvBytes);
+		recvReturnBytes = recv(sockfd, buf + totalRecvBytes, presetSize - totalRecvBytes, 0);
+
+		//check recv error; else sum totalRecvBytes
+		if(recvReturnBytes == -1){
+			perror("recv");
+			exit(1);
+		}else{
+			totalRecvBytes += recvReturnBytes;
+		}
 	}
+}
+
+/* int dataConnection(int controlfd, int datafd, char* commandAgr, char* filename)
+	* inputs:
+		* int controlfd -- file descriptor of control socket connection
+		* int datafd -- file descriptor of data socket connection
+		* char* commandArg -- c string that holds the client's command argument
+		* char* filename -- c string that holds the client's requested filename
+	* outputs:
+		* on success -- 0
+		* on failure -- -1
+	* calls:
+		* listFiles()
+		* sendPack()
+		* fopen(filename, "r/w/rw")
+		* fread()
+	* purpose:
+		* allow file transfer between server and client
+*/
+int dataConnection(int controlfd, int datafd, char* commandArg, char* filename){
+	//an array of c strings that holds the files in the current directory
+	char** fileList; 			
+	int numFiles;	//number of files in current directory
+	int check = 0;
+	int i;
+
+	//fill fileList array with current directory files
+	fileList = listFiles(".", &numFiles);
+	
+	//check client's command argument
+	//handle <COMMAND> == -l
+	if(strcmp(commandArg, "LIST") == 0){
+		//transfer each filename of current directory (".") in a packet
+		for(i = 0; i < numFiles; i++){
+			sendPack(datafd, "FNAME", fileList[i]);
+		}
+	}else if(strcmp(commandArg, "GET") == 0){
+		do{
+			//buffer for file contents
+			char fileBuf[MAX_PACK_PAYLOAD_LEN + 1];
+			int fileBytes;
+			int fileStatus;
+			//FILE* points to client specified file
+			FILE* clifile;
+			
+			//search the files in current dir
+			fileStatus = 0;
+			for(i = 0; i < numFiles && !fileStatus; i++){
+				if(strcmp(filename, fileList[i]) == 0){
+					fileStatus = 1;
+				}
+			}
+			
+			//check if <FILENAME> is in current directory
+			if(!fileStatus){
+				printf("File not found\n");
+				sendPack(controlfd, "ERROR", "File not found");
+				check = -1;
+				break;
+			}
+
+			//open file 
+			clifile = fopen(filename, "r");
+			if(clifile == NULL){
+				printf("file read error\n");
+				sendPack(controlfd, "ERROR", "File wont open");
+				check = -1; 
+				break;
+			}
+				
+			//FT the filename
+			sendPack(datafd, "FILE", filename);
+
+			//FT the file 
+			printf("FT in process\n");
+			do{
+				fileBytes = fread(fileBuf, sizeof(char), MAX_PACK_PAYLOAD_LEN, clifile);
+				//put string terminator at end of fileBuf
+				fileBuf[fileBytes] = '\0';
+				//send data in fileBuf
+				sendPack(datafd, "FILE", fileBuf);
+			}while(fileBytes > 0);
+			if(ferror(clifile)){
+				perror("fread");
+				check = -1;
+			}
+			fclose(clifile);
+		}while(0);
+	}else{
+		check = -1;
+	}
+	
+	//place done tag at end of data to indicate FTP complete 
+	sendPack(datafd, "DONE", "");
+
+	//indicate that the control connection is to be closed
+	sendPack(controlfd, "CLOSE", "");
+		
+	//deallocate fileList array
+	for(i = 0; i < numFiles; i++){
+		free(fileList[i]);
+	}
+	free(fileList);
+	return check;
+
+}
+
+/* char** listFiles(char* dirname, int* numFiles)
+	* inputs:
+		* char* dirname -- c string directory name
+		* int* numFiles -- number of files in the <dirname> directory
+	* outputs:
+		* char* array of filenames of <dirname> directory
+	* calls:
+		* DIR* opendir(const char* dirname)
+			* open a directory stream corresponding to the directory named by the dirname
+			arugment.The directory stream is positioned at the first entry. If the type of DIR
+			is implemented using a file descriptor, apps shall only be able to open up to a 
+			total of {OPEN_MAX} files and directories.
+			* returns a pointer to an object of type DIR; otherwise a null pointer 
+			shall be returned and errno set to indicate the error
+		* DIR* closedir(DIR* dirp)
+			* shall close the directory stream referred to by the argument dirp. Upon
+			return, the value of dirp may no longer point to an accessible object of the
+			type DIR. If a file descriptor is used to implement type DIR, that file descriptor 
+			shall be closed.
+			* returns 0 on success; -1 on failure
+		* struct dirent* readdir(DIR* dirp)
+			* returns a pointer to an object of type struct dirent on success; null pointer 
+			and errno set on error
+		* int stat(const char* restrict path, struct stat* restrict buf)
+			* shall obtain info about the named fil and write it to the area pointed to by the
+			buf argument.
+			* path -- points to a pathname naming a file
+			* buf -- is a pointer to a stat structure, into which info is placed concerning the
+			file
+		* S_ISDIR(mode_t m) 
+			* MACRO returns non-zero if the file is a directory
+	* purpose:
+		* lists all files in the specified directory
+*/
+char** listFiles(char* dirname, int* numFiles){
+	char** fileList;
+	DIR* dir;			//points to open directory
+	struct dirent* entry;		//entry within a directory
+	struct stat info;		//entry's info		
+	*numFiles = 0;
+	fileList = NULL;
+	
+	//open specified directory
+	dir = opendir(dirname);
+	if(dir == NULL){
+		fprintf(stderr, "ftserver: unable to open %s\n", dirname);
+		exit(1);
+	}
+
+	//store file's in fileList* array
+	while((entry = readdir(dir)) != NULL){
+		//do not open subdirectories
+		stat(entry->d_name, &info);
+		if(S_ISDIR(info.st_mode)){
+			continue;
+		}
+		
+		//push current filename to fileList array
+		{
+			if(fileList == NULL){
+				//build initial list
+				fileList = malloc(sizeof(char*));
+			}else{
+				//dynamic array growth
+				fileList = realloc(fileList, (*numFiles + 1) * sizeof(char*));
+			}
+			//check fileList array first index error
+			assert(fileList != NULL);	
+			fileList[*numFiles] = malloc((strlen(entry->d_name) + 1) * sizeof(char));
+			//check fileList array last index error
+			assert(fileList[*numFiles] != NULL);
+
+			//copy filename into fileList
+			strcpy(fileList[*numFiles], entry->d_name);
+
+			//update number of files in fileList
+			(*numFiles)++;
+		}
+	}
+
+	closedir(dir);
+	return fileList;
 }
