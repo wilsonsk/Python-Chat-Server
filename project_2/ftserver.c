@@ -75,6 +75,8 @@ void recvPack(int sockfd, char* option, char* data);
 void recvFile(int sockfd, void* buf, int size);
 int dataConnection(int controlfd, int datafd, char* commandArg, char* filename);
 char** listFiles(char* dirname, int* numFiles);
+void sendPack(int sockfd, char* option, char* data);
+void sendFile(int sockfd, void* buf, int presetSize);
 
 
 int main(int argc, char** argv){
@@ -679,4 +681,69 @@ char** listFiles(char* dirname, int* numFiles){
 
 	closedir(dir);
 	return fileList;
+}
+
+/* void sendPack(int sockfd, char* option, char* data);
+	* intputs: 
+		* int sockfd -- file descriptor for socket connection
+		* char* option -- c string for client command option
+		* char* data -- c string for client data payload
+	* outputs:
+		* none
+	* calls:
+		* sendFile()
+	* purpose:
+		* sends a packet from the specified socket
+
+*/
+void sendPack(int sockfd, char* option, char* data){
+        unsigned short packLen;         //holds client packet size
+        char optionBuf[ARG_LEN + 1];
+
+	//send packLen
+        //ntohs(uint16_t netshort): function that converts the unsigned short integer called netshort from network byte (Big Endian) order to host byte order (little Endian)
+        packLen = ntohs(sizeof(packLen) + ARG_LEN + strlen(data));
+	sendFile(sockfd, &packLen, sizeof(packLen));
+	
+	//send command option
+	//set the last index of optionBuf to string terminator
+	memset(optionBuf, '\0', ARG_LEN);
+	strcpy(optionBuf, option);
+	sendFile(sockfd, optionBuf, ARG_LEN);
+
+	//send data
+	sendFile(sockfd, data, strlen(data));
+}
+
+/* void sendFile(int sockfd, void* buffer, int presetSize){
+	* inputs:
+                * int sockfd -- file descriptor of the socket connection to be used for FTP
+                * void* buf -- this is a generic pointer type which can be converted to any other pointer type without explicit cast: must convert to complete data type before dereferencing or pointer arithmetic
+                            -- this buffer will be used to store the client's data
+                * int size -- pre determined number of bytes to accept/receive from client
+	* outputs:
+		* none
+	* calls:
+		* send() -- shall initiate transmission of a message from the specified socket to its peer'
+			* returns number of bytes sent on success, -1 on failure 
+	* purpose:
+		* send data until bytes sent is = to the preset size
+
+*/
+void sendFile(int sockfd, void* buffer, int presetSize){
+	int sentReturnBytes;            //holds return value of recv()
+        int totalSentBytes = 0;         //holds total number of bytes received from client
+	
+	while(totalSentBytes < presetSize){
+		sentReturnBytes = send(sockfd, buffer + totalSentBytes, presetSize - totalSentBytes, 0);
+		
+		//check error
+		if(sentReturnBytes == -1){
+			perror("sendFile");
+			exit(1);
+		}else{
+			//update total sent bytes
+			totalSentBytes += sentReturnBytes;
+		}	
+	}
 }
