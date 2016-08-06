@@ -67,11 +67,13 @@ def main():
 	global s_host
 
 	checkArgs()
+	
+	ftp()
 
 	sys.exit(0)	
 
 
-# void checkArgs function: 
+# checkArgs function: 
 #	* inputs:
 #		* the global command line arguments defined at top of main()
 #	* outputs:
@@ -114,8 +116,21 @@ def checkArgs():
 		print "error: <SERVER_PORT> argument must be in range [1024, 65535]"
 		sys.exit(1)
 
+	if(s_port == dataConnPort):
+		print "error: Server port can't be same as data port"
+		sys.exit(1)
 
-
+# checkPortArg function
+#	* inputs:
+#		* commandArg -- uses's <COMMAND> option
+#	* outputs:
+#		* on success -- a match object 
+#		* on failure -- None
+#	* calls:
+#		* re.match()
+#	* purpose:
+#		* attempts to match regular expression pattern to a string
+#
 def checkPortArg(commandArg):
 	#re.match(pattern, string, flags=0) -- attempts to match RE pattern to string with optional flags
 	#returns a match object on success; None on failure
@@ -123,8 +138,262 @@ def checkPortArg(commandArg):
 	#this re checks if string parameter is a character 0-9 (i.e., is an integer)
 	return re.match("^[0-9]+$", commandArg) is not None
 
+# ftp function
+#	* inputs:
+#		* global variables
+#	* outputs
+#		* on success -- none
+#		* on failure -- exit(1) 
+#	* calls:
+#		* controlConnection(int sockfd)
+#		* bind()
+#		* list()
+#		* format()
+#		* accept()
+#		* setsockopt()
+#		* socket()
+#		* connect()
+#		* close()
+#	* purpose:
+#		* file transfer service between client and server
+#
+def ftp():
+	try:
+		control_sockfd = socket(AF_INET, SOCK_STREAM, 0)
+	except Exception as x:
+		print x.strerror
+		sys.exit(1)
+
+	try:
+		control_sockfd.connect((s_host, s_port))
+	except Exception as x:
+		print x.strerror
+		sys.exit(1)	
+	
+	status = controlConnection(control_sockfd)
+	
+	if status != -1:
+		try:
+			client_sockfd = socket(AF_INET, SOCK_STREAM, 0)
+		except Exception as x:
+			print x.strerror
+			sys.exit(1)
+
+		#bind client socket with specified data port
+		try:
+			client_sockfd.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+			client_sockfd.bind(("", dataConnPort))
+		except Exception as x:
+			print x.strerror
+			sys.exit(1)
+
+		# listen for connections
+		try:
+			client_sockfd.listen(BACKLOG)
+		except Exception as x:
+			print x.strerror
+			sys.exit(1)
+	
+		#FTP data connection
+		try:
+			data_sockfd = client_sockfd.accept()[0]
+		except Exception as x:
+			print x.strerror
+			sys.exit(1)
+		print "FTP data connection with: " + {0}.format(s_host)
+		
+		#FTP
+		dataConnection(control_sockfd, data_sockfd)
+
+		#error feedback
+		while true:
+			optionBuf, dataBuf = recvPack(control_sockfd)
+			if optionBuf == "ERROR":
+				print "recv optionBuf" + optionBuf
+			if dataBuf == "CLOSE":
+				break
+
+		#close control connection
+		try:
+			control_sockfd.close()
+		except Exception as x:
+			print x.strerror
+			sys.exit(1)
+		print "FTP control connection closed"	
+
+# controlConnection function
+#	* inputs:
+#		* control_sockfd -- socket file descriptor of control connection
+#	* outputs:
+#		* on success -- 0
+#		* on failure -- -1
+#	* calls:
+#		* str()
+#		* recvPack()
+#		* sendPack()
+#	* purpose:
+#		* creates control connection 
+#
+def controlConnection(control_sockfd):
+	optionBuf = "DPORT"
+	dataBuf = str(dataConnPort)
+	sendPack(control_sockfd, optionBuf, dataBuf)
+	
+	optionBuf = "NULL"
+	dataBuf = ""
+	
+	if(commandArg == "-l"):
+		optionBuf = "LIST"
+	elif(commandArg == "-g"):
+		optionBuf = "GET"
+		dataBuf = filename
+
+	sendPack(control_sockfd, optionBuf, dataBuf)
+	
+	#read in server response
+	servOptionBuf, servDataBuf = recvPack(control_sockfd)	
+	
+	#error check
+	if(servOptionBuf == "ERROR"):
+		return -1
+
+	return 0
+
+# dataConnection function
+#	* inputs:
+#		* control_sockfd -- control connection socket
+#		* data_sockfd -- data connection socket
+#	* outputs:
+#		* on success -- 0
+#		* on failure -- -1
+#	* calls:
+#		* os.path.exists()
+#		* open()
+#		* recvPack()
+#		* write()
+#		* sendPack()
+#	*purpose:
+#		* creates data connection 
+def dataConnection(control_sockfd, data_socketfd):
+	check = 0
+
+	optionBuf, dataBuf = recvPack(data_sockfd)
+
+	#print list of file names
+	if(option == "FNAME"):
+		while(optionBuf != "DONE"):
+			print dataBuf + "\n"
+			optionBuf, dataBuf = recvPack(data_sockfd)
+			
+	elif(optionBuf == "FILE"):
+		filename = dataBuf
+		if(os.path.exists(filename)):
+			print "file: {0} already exists".format(filename)
+			check = -1
+		else:
+			#write new file from data
+			with open(filename, "W") as newfile:
+				while(optionBuf != "DONE"):
+					optionBuf, dataBuf = recvPack(data_sockfd)
+					newfile.write(dataBuf)
+			print "FTP complete"
+
+	else:
+		check = -1
+
+		sendPack(control_sockfd, "ACK", "")
+
+		return check
 
 
+# recvPack function
+#	* inputs:
+#		* sockfd -- socket to receive packet from
+#	* outputs:
+#		* pair of received <COMMAND> option and data
+#	* calls:
+#		* recvFile()
+#		* unpack(fmt, string) -- unpack the string according to the given 
+#		format.
+#				      -- returns a tuple even if it contains 1 item
+#				      -- the string must contain exactly the amount
+#					of data required by the format
+#		* rstrip([chars]) -- returns a copy of the string in which all chars
+#		have been stripped from the end of the string 
+#				  -- returns a copy of the string in which all chars
+#				have been stripped from end of string
+#	* purpose:
+#		* receive packet from the specified socket
+#
+def recvPack(sockfd):
+	packLen = unpack(">H", recvFile(sockfd, 2))[0]
+	
+	#read in <COMMAND> option
+	#stip termination string character off string 
+	option = recvAll(sockfd, ARG_LEN).rstrip("\0")
+	
+	data = recvFile(sockfd, packLen - ARG_LEN - 2)
+	
+	return option, data
+
+# recvFile function
+#	* inputs:
+#		* sockfd -- file descriptor of socket to receive from
+#		* presetSize -- specified number of bytes to receive from
+#	* outputs:
+#		* data (file) received stored in dataBuffer
+#	* calls:
+#		* len()
+#		* recv()
+#	* purpose:
+#		* receive specified number of bytes from data (file)
+#
+def recvFile(sockfd, presetSize):
+	data = ""
+	while(len(data) < presetSize):
+		try:
+			data += sockfd.recv(presetSize - len(data))
+		except Exception as x:
+			print x.strerror
+			sys.exit(1)
+
+	return data
 
 
+# sendPack function
+#	* inputs:
+#		* sockfd -- socket file descriptor to send from 
+#		* option -- send option 
+#		* data -- send data
+#	* outputs:
+#		* None
+#	* calls:
+#		* ljust(width[, fillchar]) -- returns the string left justified in a 
+#		string of length
+#			* width -- string length in total after padding
+#			* fillchar -- the filler character, default is space
+#		width. Padding is done using the specified fillchar (default is a 
+#		space). The original string is returned if width is less than len(s)
+#		* len()
+#		* pack(fmt, v1, v2, ...) -- returns a string containing the value 
+#		v1, v2, .. packed according to the given format. The arguments must
+#		match the values required by the format exaclty  
+#		* sendall()
+#	* purpose:
+#		* send packet from specified socket
+#
+def sendPack(sockfd, option = "", data = ""):
+	packLen = 2 + ARG_LEN + len(data)
+	packet = pack(">H", packLen)
+	packet += option.ljust(ARG_LEN, "\0")
+	packet += data
+
+	#send to server
+	try:
+		sockfd.sendall(packet)
+	except Exception as x:
+		print x.strerror
+		sys.exit(1)
+
+#run main
 main()
