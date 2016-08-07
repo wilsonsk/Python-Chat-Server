@@ -82,6 +82,7 @@ void sendFile(int sockfd, void* buf, int presetSize);
 int main(int argc, char** argv){
 	int s_portno;
 	checkArgs(argc, argv, &s_portno);
+	printf("debug: portno = %d\n", s_portno);
 	ftp(s_portno);	
 
 	return 0;
@@ -119,7 +120,6 @@ void checkArgs(int argc, char** argv, int* s_portno){
 		fprintf(stderr, "error: ftserver port number must be between 1024-65535\n");
 		exit(1);
 	}
-
 }
 
 /* int checkPortArg function: 
@@ -260,7 +260,7 @@ void ftp(int s_portno){
 		
 
 	//initiate FTP services upon client connection to server socket
-	printf("Server open on %d\n", serv_addr.sin_port);
+	printf("Server open on %d\n", s_portno);
 	while(1){
 		// initialize client socket vars
 		char* clientIP;		//holds client IPv4 dd address
