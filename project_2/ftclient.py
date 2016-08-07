@@ -66,15 +66,6 @@ def main():
 	global s_port
 	global s_host
 
-	checkArgs()
-
-	print "s_host = " + str(s_host)
-	
-	ftp()
-
-	sys.exit(0)	
-
-
 # checkArgs function: 
 #	* inputs:
 #		* the global command line arguments defined at top of main()
@@ -91,7 +82,7 @@ def main():
 #		* checks that argument 1 <SERVER_PORT> is within range
 #		* check the command line arugment assigned values
 #
-def checkArgs():
+#def checkArgs():
 	if(len(sys.argv) not in (5, 6)):
 		print "usage: python ftclient <SERVER-HOSTNAME> <SERVER_PORT> -l | -g [<FILENAME>] <DATA_PORT>"
 		sys.exit(1)
@@ -101,12 +92,6 @@ def checkArgs():
 	commandArg = sys.argv[3]
 	filename = sys.argv[4] if len(sys.argv) == 6 else None
 	dataConnPort = sys.argv[5] if len(sys.argv) == 6 else sys.argv[4]
-
-	print "s_host = " + str(s_host)
-	print "s_port = " + str(s_port)
-	print "commandArg = " + str(commandArg)
-	print "filename = " + str(filename)
-	print "dataConnPort = " + str(dataConnPort)
 
 	#check -g option associated with proceeding filename
 	if commandArg == "-g" and filename is None:
@@ -127,6 +112,10 @@ def checkArgs():
 	if(s_port == dataConnPort):
 		print "error: Server port can't be same as data port"
 		sys.exit(1)
+	
+	ftp()
+
+	sys.exit(0)	
 
 # checkPortArg function
 #	* inputs:
@@ -184,7 +173,7 @@ def ftp():
 		print x.strerror
 		sys.exit(1)	
 
-	print "control connection established with " + {0}.format(s_host, s_port)	
+	print "control connection established with \"{0}\"".format(s_host, s_port)	
 	status = controlConnection(control_sockfd)
 	
 	if status != -1:
@@ -345,7 +334,7 @@ def recvPack(sockfd):
 	
 	#read in <COMMAND> option
 	#stip termination string character off string 
-	option = recvAll(sockfd, ARG_LEN).rstrip("\0")
+	option = recvFile(sockfd, ARG_LEN).rstrip("\0")
 	
 	data = recvFile(sockfd, packLen - ARG_LEN - 2)
 	
