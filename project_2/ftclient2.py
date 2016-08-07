@@ -1,13 +1,3 @@
-# Brett Fedack
-# CS372 Summer 2015
-# Project 1
-# Description: This program is a client that connects with a companion FTP
-#   server program. Once connected, a client can request either a file listing
-#   of the server's current directory or one-way transmission of a file from
-#   server to client. The FTP session is managed over a control connection, and
-#   the transmission of file information occurs over a separate data connection
-#   in a manner that is consistent with FTP active mode.
-
 import os                       # Miscellaneous operating system interfaces
 import re                       # Regular expressions
 import sys                      # System-specific parameters

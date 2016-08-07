@@ -1,17 +1,3 @@
-/*
- * Brett Fedack
- * CS372 Summer 2015
- * Project 2
- * Description: This program is a server that connects with one client at a
- *   time to provide FTP services. Connected clients can request either a file
- *   listing of the server's current directory or one-way transmission of a
- *   file from server to client. The FTP session is managed over a control
- *   connection, and the transmission of file information occurs over a
- *   separate data connection in a manner that is consistent with FTP active
- *   mode. After closing a connection with one client, the server continues to
- *   listen for additional client requests until receiving an interrupt signal.
- */
-
 #include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
